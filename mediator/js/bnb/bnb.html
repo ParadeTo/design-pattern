@@ -1,0 +1,659 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<script src="js/jquery-1.3.2.min.js"></script>
+<script>
+
+$.extend($.easing, {
+	easeOutElastic: function (x, t, b, c, d) {
+		var s=1.70158;var p=0;var a=c;
+		if (t==0) return b;  if ((t/=d)==1) return b+c;  if (!p) p=d*.3;
+		if (a < Math.abs(c)) { a=c; var s=p/4; }
+		else var s = p/(2*Math.PI) * Math.asin (c/a);
+		return a*Math.pow(2,-10*t) * Math.sin( (t*d-s)*(2*Math.PI)/p ) + c + b;
+	}
+});
+
+var mainPe;
+var subPe;
+
+function Base(){};
+
+Base.prototype.init = function(){
+	this.createdToMap();
+	if (this.jqDom) this.img = this.jqDom.children();
+	return this;
+}
+
+Base.prototype.createdToMap = function(){
+	this.useGird();
+	if(this.imgName != 'none'){
+		this.jqDom = $('<div></div>').appendTo($('#gameMap'));
+		this.img = $('<img src=' + this.root + '/' +this.imgName + '.gif></img>').appendTo(this.jqDom).hide();
+		var pos = this.getImgPos();
+		this.jqDom.css({left:pos[1], top:pos[0]});
+		this.jqDom.css({'z-index':this.j*2+100});
+		this.img.show();
+	}
+	return this;
+}
+
+Base.prototype.getImgPos = function(){
+	return [40*(this.j+1) - this.img.height(), this.i*40];
+}
+
+Base.prototype.useGird = function(){
+	if (typeof Game.map[this.j][this.i] == 'object') {
+		Game.map[this.j][this.i][this.type] = this;
+	}
+	else {
+		Game.map[this.j][this.i] = {};
+		Game.map[this.j][this.i][this.type] = this;
+	}
+	return this;
+}
+
+Base.prototype.freeGird = function(a){
+	Game.map[this.j][this.i][this.type] = null;
+	return this;
+}
+
+Base.prototype.probe = function(dir){
+	var dir = dir || this.dir, j = this.j, i = this.i;
+	switch(dir){
+		case 0 : i -= 1; break;
+		case 1 : j -= 1; break;
+		case 2 : i += 1; break;
+		case 3 : j += 1; break;
+	}
+	return Game.map[Math.round(j)][Math.round(i)];
+}
+
+Base.prototype.hit = function(){
+	if ((this.tempI >> 0 == this.tempI && (this.dir == 0 || this.dir == 2)) || (this.tempJ >> 0 == this.tempJ && (this.dir == 1 || this.dir == 3))){
+		var gird = this.probe();
+		if (!gird) return;
+		if ((gird.mainPe || gird.subPe) && this.enemy.baowei && !this.baowei) this.enemy.die();
+		if (!gird.baffle && !gird.bob) return 0;
+		var baffle = gird.baffle;
+		if (this.constructor == Pe && baffle.push) {
+			baffle.pushing(this);
+			return 1;
+		}
+		if (!baffle.past || gird.bob) return 1;
+	}
+	return 0;
+}
+
+Base.prototype.toBorder = function(j, i){
+	var dir = this.dir, j = j || this.j, i = i || this.i;
+	if (dir == 0 && i <= 0 || dir == 1 && j <= 0 || dir == 2 && i >= 8 || dir == 3 && j >= 7) return true;	
+}
+
+Base.prototype.setImg = function(img){
+	this.img.attr('src', this.root + '/' + img);
+}
+
+Base.prototype.remove = function(){
+	if (this.jqDom) this.jqDom.remove();
+	this.freeGird();
+}
+
+function Baffle(j, i, imgName, past, expo, push){
+	this.j = j;
+	this.i = i;
+	this.imgName = imgName;
+	this.past = past;   //可通过
+	this.expo = expo;   //可爆炸
+	this.push = push;   //可推动
+	this.type = 'baffle';
+	this.root = 'baffle';
+	return this;
+}
+
+Baffle.prototype = new Base;
+
+Baffle.prototype.init = function(){
+	this.createdToMap();
+	if (this.jqDom) {
+		this.img = this.jqDom.children();
+		if (this.imgName == 'wall') this.jqDom.css({'z-index':this.j*2 + 101});
+	}
+	return this;
+}
+
+Baffle.prototype.destroy = function(){
+	if (!this.expo || !this.jqDom) return;
+	if (this.imgName != 'wall') this.img.attr('src', this.root + '/destroy_' + this.imgName + '.gif');
+	var me = this;
+	(function(){
+		me.remove();
+		if (Math.random() < .7 && me.imgName != 'wall' && !Game.map[me.j, me.i].props) new Props(me.j, me.i).init();
+	}).defer(140);
+}
+
+Baffle.prototype.pushing = function(pe){
+	if (!this.push) return;
+	var dir = this.dir = pe.dir;
+	if (this.toBorder()) return;
+	var probe = this.probe(dir), baffle = probe.baffle;
+	if (probe.mainPe || probe.subPe || probe.bob || (baffle && baffle.imgName == 'wall') || (baffle && !baffle.past)) return;
+	this.push = false;
+	var me = this;
+	switch(dir){
+		case 0 : this.jqDom.animate({left:'-=40px'}, 500, function(){me.push = true; me.freeGird(); me.i -= 1; me.useGird()}); break;
+		case 2 : this.jqDom.animate({left:'+=40px'}, 500, function(){me.push = true; me.freeGird(); me.i += 1; me.useGird()}); break;
+		case 1 : this.jqDom.animate({top:'-=40px'}, 500, function(){me.push = true; me.freeGird(); me.j -= 1; me.jqDom.css({'z-index':me.j*2+100}); me.useGird()}); break;
+		case 3 : this.jqDom.animate({top:'+=40px'}, 500, function(){me.push = true; me.freeGird(); me.j += 1; me.jqDom.css({'z-index':me.j*2+100}); me.useGird()}); break;
+	}
+}
+
+function Pe(j, i, root, imgName, type){
+	this.j = j;
+	this.i = i;
+	this.root = root;
+	this.imgName = imgName;
+	this.past = true;
+	this.expo = true;
+	this.push = false;
+	this.dir = 3;
+	this.newDir = null;
+	this.clip = [];
+	this.clipLength = 1;
+	this.state = 'stand';
+	this.type = type;
+	this.bobLevel = 1;
+	this.speed = 5;
+	this.tempJ = j;
+	this.tempI = i;
+	this.tor = false;
+	this.fRoot = root;
+	this.enemy = null;
+	this.invTime = 0;
+	this.locked = true;
+	this.stepLocked = false;
+	this.reviseLocked = false;
+	this.baowei = false;
+	return this;
+}
+
+Pe.prototype = new Base;
+
+Pe.prototype.init = function(){
+	this.createdToMap();
+	this.constructor = Pe;
+	for (var i = 0; i < this.clipLength; i++)
+		this.clip.push(new Bob(this).init());
+	var me = this;
+	(function(){ me.stand() }).defer(1000);
+	return this;
+}
+
+Pe.prototype.stand = function(){
+	var me = this;
+	this.setImg(['left', 'up', 'right', 'down'][this.dir] + '_stand.gif');
+	this.state = 'stand';
+	if (this.tor) return;
+	this.load = setTimeout(function(){me.setImg('load.gif')}, 2000);
+}
+
+Pe.prototype.setMoveImg = function(){
+	var dir = this.newDir;
+	if (dir != this.dir || this.state == 'stand'){
+		if (Math.abs(dir - this.dir) == 1 || Math.abs(dir - this.dir) == 3) this.reviseLocked = true;
+		else this.reviseLocked = false;
+		clearTimeout(this.load);
+		this.setImg(['left', 'up', 'right', 'down'][dir] + '.gif');
+		this.dir = dir;
+		this.state = 'move';
+	}
+}
+
+Pe.prototype.move = function(){
+	if (this.state == 'win' || this.state == 'dead') return;
+	if (!this.baowei) this.setMoveImg();
+	if (this.locked || this.stepLocked || this.toBorder(this.tempJ, this.tempI) || this.hit()) return;
+	this.stepLocked = true;
+	var me = this;
+	this.revise(function(){me.moveing()});
+}
+
+Pe.prototype.revise = function(fn){
+	if (this.reviseLocked){
+		var pos = this.getImgPos(), me = this, dis;
+		if (this.dir == 0 || this.dir == 2) dis = this.tempJ - Math.round(this.tempJ);
+		else if (this.dir == 1 || this.dir == 3) dis = this.tempI - Math.round(this.tempI);
+		this.jqDom.animate({top:pos[0], left:pos[1]}, dis*dis*150*Math.max(this.speed, 4), 'swing', function(){
+			me.tempJ = me.j;
+			me.tempI = me.i;
+			me.reviseLocked = false;
+			me.stepLocked = false;
+		});
+	}
+	else fn();
+}
+
+Pe.prototype.moveing = function(){
+	if(!this.baowei || this.state != 'dead') this.state = 'move';
+	var w, d;
+	switch(this.dir){
+		case 0: this.tempI -= .25; w = 'left'; d = -1; break;
+		case 2: this.tempI += .25; w = 'left'; d = 1; break;
+		case 1: this.tempJ -= .25; w = 'top'; d = -1; break;
+		case 3: this.tempJ += .25; w = 'top'; d = 1; break;
+	}
+	var dom = this.jqDom.get(0);
+	this.tempPos = parseInt(dom.style[w]);
+	this.freeGird();
+		for (var i = 1; i < 11; i++){
+			var closure = ~function(i, t){
+				var s = setTimeout(function(){
+					dom.style[w] = t.tempPos + d*i + 'px';
+					clearTimeout(s);
+					if (i == 10){
+						closure = null;
+						t.stepLocked = false;
+						var j1 = Math.round(t.tempJ), i1 = Math.round(t.tempI);
+						if (j1 != t.j) t.jqDom.css({'z-index':j1*2+100});
+						t.j = j1;
+						t.i = i1;
+						t.useGird();
+						var gird = Game.map[t.j][t.i];
+						if (gird.props) {
+							gird.props[gird.props.prop](t);
+							gird.props.remove();
+						}
+					}
+				}, i*t.speed)
+			}(i, this);
+		}
+}
+
+
+Pe.prototype.putBob = function(){
+	if (this.baowei || this.state == 'dead' || this.state == 'win' || !this.clip.length || Game.map[this.j][this.i].bob) return;
+	this.clip.pop().play();
+}
+
+Pe.prototype.destroy = function(){
+	if (this.invTime || this.baowei || this.state == 'dead') return;
+	if (this.tor) {
+		this.tor = false;
+		this.root = this.fRoot;
+		this.speed = 5;
+		this.stand();
+		this.invTime = 500;
+		var me = this;
+		(function(){me.invTime = 0}).defer(this.invTime)
+		return;
+	}
+	this.setImg('dead1.gif');
+	this.baowei = true;
+	clearTimeout(this.load);
+	this.speed = 30;
+	this.deadImg = $('<div><img src=specil/dead1.gif></img></div>').appendTo(this.jqDom).css({top:'0px', left:'-10px', opacity:.3}).animate({opacity:1}, 3000);
+	this.img.animate({opacity:0}, 2500);
+	var me = this;
+	(function(){
+		me.deadImg.children().attr('src', 'specil/dead2.gif');
+	}).defer(400);
+	this.s1 = setTimeout(function(){
+		me.die();
+	}, 4000)
+}
+
+Pe.prototype.die = function(){
+	clearTimeout(Game.u);
+	clearTimeout(this.s1);
+	clearTimeout(this.enemy.load);
+	if (this.enemy.baowei) this.enemy.relive();
+	this.enemy.state = 'win';
+	this.enemy.setImg('win.gif');
+	this.state = 'dead';
+	Sound.play('dead');
+	var me = this;
+	(function(){
+		me.img.stop();
+		me.deadImg.css({top:'60px'});
+		me.deadImg.children().attr('src', 'specil/dead3.gif');
+		(function(){me.deadImg.children().attr('src', '')}).defer(150);
+		me.jqDom.css({top:me.j*40-95});
+		me.img.attr('src', me.root + '/dead2.gif').css({opacity:1});
+		(function(){
+			me.img.attr('src', '');
+			me.remove();
+			Game.win();
+			Sound.stop('bgSound');
+			Sound.play('win');
+		}).defer(1500);
+	}).defer(600);
+}
+
+Pe.prototype.relive = function(){
+	clearTimeout(this.s1);
+	this.img.stop();
+	this.deadImg.children().attr('src', 'specil/dead3.gif');
+	var me = this;
+	(function(){me.deadImg.children().attr('src', '')}).defer(150);
+	this.img.css({opacity:1})
+	this.stand();
+	return;
+}
+
+function Bob(pPe){
+	this.pPe = pPe;
+	this.past = false;
+	this.expo = true;
+	this.push = false;
+	this.type = 'bob';
+	this.root = 'bob';
+	this.s = null;
+}
+
+Bob.prototype = new Baffle();
+
+Bob.prototype.init = function(){
+	this.jqDom = $('<div></div>').appendTo($('#gameMap')).hide().css({'z-index':1});
+	this.img = $('<img src=' + this.root + '/bob.gif></img>').appendTo(this.jqDom);
+	return this;
+}
+
+Bob.prototype.play = function(){
+	this.j = this.pPe.j;
+	this.i = this.pPe.i;
+	var me = this;
+	me.useGird();
+	this.jqDom.css({top:this.j*40, left:this.i*40}).show();
+	var me = this, j = this.j, i = this.i, level = this.pPe.bobLevel, ary = [Game.map[j][i]];
+	for (var i1 = i - 1; i1 >= i - level; i1--){
+		if (i1 < 0) break;
+		var gird = Game.map[j][i1];
+		ary.push(gird);
+		if (gird.baffle && !gird.baffle.past) break;
+	}
+
+	for (var i1 = i + 1; i1 <= i + level; i1++){
+		if (i1 > 8) break;
+		var gird = Game.map[j][i1];
+		ary.push(gird);
+		if (gird.baffle && !gird.baffle.past) break;
+	}
+	
+	for (var j1 = j + 1; j1 <= j + level; j1++){
+		if (j1 > 7) break;
+		var gird = Game.map[j1][i];
+		ary.push(gird);
+		if (gird.baffle && !gird.baffle.past) break;
+	}
+	
+	for (var j1 = j - 1; j1 >= j - level; j1--){
+		if (j1 < 0) break;
+		var gird = Game.map[j1][i];
+		ary.push(gird);
+		if (gird.baffle && !gird.baffle.past) break;
+	}
+	this.effects = ary;
+	var me = this;
+	this.s = setTimeout(function(){
+		clearTimeout(this.s);
+		me.destroy();
+	}, 3000);
+}
+
+Bob.prototype.destroy = function(){
+	clearTimeout(this.s);
+	this.freeGird();
+	this.img.attr('src', this.root + '/' + this.pPe.bobLevel + '.gif');
+	this.jqDom.css({top:(this.j-this.pPe.bobLevel)*40, left:(this.i-this.pPe.bobLevel)*40});
+	var me = this;
+	(function(){
+		me.img.attr('src', me.root + '/bob.gif');
+		me.recover();
+	}).defer(200);
+	var ary = this.effects;
+	for (var i = 0; i < ary.length; i++){
+		var obj = ary[i];
+		if (obj.baffle && obj.baffle.expo) obj.baffle.destroy();
+		if (obj.bob) obj.bob.destroy();
+		if (obj.props) obj.props.remove();
+		if (obj.mainPe) obj.mainPe.destroy();
+		if (obj.subPe) obj.subPe.destroy();
+	}
+}
+
+Bob.prototype.recover = function(){
+	this.jqDom.hide();
+	this.pPe.clip.push(this);
+}
+
+function Props(j, i){
+	this.j = j;
+	this.i = i;
+	this.root = 'props';
+	this.type = 'props';
+}
+
+Props.prototype = new Baffle;
+
+Props.prototype.init = function(){
+	this.prop = this.imgName = ['greenTor','greenTor', 'bob', 'power', 'speed', 'food', 'bob'][Math.round(Math.random()*7)];
+	if (!this.prop) return;
+	this.createdToMap();
+	this.shadow = new Shadow(this.j, this.i, 'shadowSmall').init();
+}
+
+Props.prototype.bob = function(pe){
+	if (pe.clip.length <= 4) pe.clip.push(new Bob(pe).init());
+}
+
+Props.prototype.speed = function(pe){
+	if (pe.tor) return;
+	if (pe.speed >= 2) pe.speed -= 1.1;
+}
+
+Props.prototype.power = function(pe){
+	if (pe.bobLevel <= 3) pe.bobLevel++;
+}
+
+Props.prototype.greenTor = function(pe){
+	if (pe.tor) return;
+	if (Math.random() > .66) {
+		this.redTor(pe);
+		return;
+	}
+	pe.tor = 'greenTor';
+	pe.speed = 10;
+	pe.root = pe.fRoot + '/greenTor';
+	pe.stand();
+}
+
+Props.prototype.redTor = function(pe){
+	if (pe.tor) return;
+	pe.tor = 'redTor';
+	pe.speed = 1.5;
+	pe.root = pe.fRoot + '/redTor';
+	pe.stand();
+}
+
+Props.prototype.food = function(pe){
+	if (pe.tor == 'greenTor'){
+		pe.tor = false;
+		this.redTor(pe);
+	}
+}
+
+Props.prototype.remove = function(){
+	this.jqDom.remove();
+	this.shadow.remove();
+	this.freeGird();
+}
+
+function Shadow(j, i, imgName){
+	this.j = j;
+	this.i = i;
+	this.imgName = imgName;
+	this.type = 'shadow';
+	this.root = 'shadow';
+}
+
+Shadow.prototype = new Base;
+
+var Game = {
+	mapping : ['none', 'tree', 'box', 'box1', 'box2', 'house1', 'house2', 'house3', 'wall'],
+	
+	map : [
+						[15, 4, 1, 2, 0, 0, 1, 3, 4],
+						[0, 0, 8, 0, 0, 2, 8, 4, 6],
+						[2, 6, 1, 2, 2, 2, 1, 5, 2],
+						[6, 3, 0, 0, 0, 2, 0, 4, 3],
+						[8, 1, 8, 2, 0, 0, 8, 1, 8],
+						[3, 4, 1, 2, 2, 2, 1, 4, 6],
+						[0, 0, 0, 2, 0, 0, 0, 0, 1],														
+						[4, 3, 1, 0, 0, 2, 1, 0, 14]
+																				 ],
+
+	creatMap : function(){
+		for (var j = 0; j < this.map.length; j++){
+			for (var i = 0; i < this.map[j].length; i++){
+				var type = this.map[j][i];
+				var imgName = this.mapping[type];
+					if (type == 14) mainPe = new Pe(j, i, 'mainPe', 'born', 'mainPe').init();
+					else if (type == 15) subPe = new Pe(j, i, 'subPe', 'born', 'subPe').init();
+					else{
+							new Baffle(j, i, imgName, (/^1|2|3|4|5|6|7$/).test(type) ? false : true,
+								(/^2|3|4|8$/).test(type) ? true : false, type == 2 ? true : false).init();
+					}
+			}
+		}
+	},
+	
+	u : function(){
+		Game.u = setInterval(function(){
+			mainPe.locked || mainPe.move();
+			subPe.locked || subPe.move();
+		}, 19);
+	},
+	
+	win : function(){
+		var win = $('<div class=win></div>').appendTo($('#gameMap'));
+		var imgs = ['w', 'i', 'n', 'nn'];
+		for (var i = 0; i < 4; i++){
+			~function(i){
+				var span = $('<span><img src=specil/'+imgs[i]+'.gif></span>').appendTo(win);
+				(function(){
+					span.animate({top:'+420px'}, 1000, 'easeOutElastic',function(){
+						(function(){window.location.reload()}).defer(3000);
+					});	
+				}).defer(i*100);
+			}(i)
+		}
+	},
+
+	imageReady : function(fn){
+		var aryImg = [
+			'baffle/box.gif', 'baffle/box1.gif', 'baffle/box2.gif', 'baffle/house1.gif', 'baffle/house2.gif', 'baffle/house3.gif', 'baffle/tree.gif', 'baffle/wall.gif', 'baffle/hide_wall.gif',
+			'mainPe/born.gif', 'subPe/born.gif', 'props/bob.gif', 'props/power.gif', 'props/speed.gif', 'props/food.gif', 'props/greenTor.gif', 'shadow/shadowSmall.gif', 'specil/dead3.gif'
+		], aryTemp = [], len = aryImg.length;
+		for (var i = 0; i < len; i++){
+			aryTemp[i] = new Image;
+			aryTemp[i].src = aryImg[i];
+		}
+		var s = setInterval(function(){
+			if (aryTemp[len - 1] && !aryTemp[len - 1].style.height) {
+				fn();
+				clearInterval(s);
+			}
+		}, 19)
+	}
+}
+
+var Event = {
+	init : function(){
+		$().bind('keydown', function(ev){
+			var key = ev.keyCode;
+			13 == key && mainPe.putBob();
+			32 == key && subPe.putBob();
+			if ( (/^37|38|39|40$/).test(key) ){
+				mainPe.newDir = key - 37;
+				mainPe.locked = false;
+			}
+			if ( (/^65|87|68|83$/).test(key) ){
+				subPe.newDir = {'65':0, '87':1, '68':2, '83':3}[key];
+				subPe.locked = false;
+			}
+		})
+
+		$().bind('keyup', function(ev){
+			var key = ev.keyCode;
+			if ( (/^65|87|68|83$/).test(key) ){
+				subPe.locked = true;
+				subPe.stand();
+			}
+			if ( (/^37|38|39|40$/).test(key) ){
+				mainPe.locked = true;
+				mainPe.stand();
+			}
+		})
+
+		$().bind('mousedown',  function(){
+			return false;	
+		});
+
+		$().bind('contextmenu', function(){
+			return false;	
+		});
+	}
+}
+
+var Sound = {
+	play : function(src){
+		$('<bgsound src=mp3/' + src + '.mp3></bgsound>').appendTo($('body'));	
+	},
+	stop : function(id){
+		$('#'+id).html('');
+	}
+}
+
+Function.prototype.defer = function(time){
+	var me = this;
+	var s = setTimeout(function(){
+		me();
+		clearTimeout(s);
+	}, time)
+};
+
+$().ready(function(){
+	$.browser.msie ? $('<span id="bgSound"><bgsound src="mp3/bgSound.mp3" loop="infinite" autostart="true"></bgsound></span>').appendTo($('body')) : 
+			$('<span id="bgSound"><bgsound src="mp3/bgSound.mp3" loop="true" autostart="true"></bgsound></span>').appendTo($('body'));
+	Game.imageReady(function(){
+		Game.creatMap();
+		mainPe.enemy = subPe;
+		subPe.enemy = mainPe;
+		Game.u();
+		Event.init();
+		Sound.play('born');	
+	});
+})
+
+window.onerror = function(){
+	return true;
+}
+</script>
+
+<style>
+	#gameMap{height:320px;width:360px;position:absolute;left:20px;top:45px}
+	#gameMap div{position:absolute}
+	#bg{position:absolute;height:385px;width:400px;z-index:-1;left:380px;top:80px;background:url(specil/bg.gif)}
+	body, html{overflow:hidden;background:#276fe6}
+	.win{top:-300px; left:55px; width:500px;position:relative;z-index:1001}
+	.win span{margin-right:3px;position:relative}
+</style>
+
+<body>
+
+	<div id="bg">
+		<div id="gameMap"></div>
+	</div>
+</body>
+
+</html>
